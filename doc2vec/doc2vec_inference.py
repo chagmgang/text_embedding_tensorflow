@@ -94,7 +94,8 @@ loss = tf.reduce_mean(tf.nn.nce_loss(softmax_weights, softmax_biases, train_labe
 optimizer = tf.train.AdagradOptimizer(0.5).minimize(loss)
     
 norm = tf.sqrt(tf.reduce_sum(tf.square(doc_embeddings), 1, keep_dims=True))
-normalized_doc_embeddings = doc_embeddings / norm
+input_signal = tf.placeholder(tf.float32, shape=[None], name='inputs')
+normalized_doc_embeddings = tf.divide(doc_embeddings, norm, name='prediction')
 
 ############################
 # Chunk the data to be passed into the tensorflow Model
@@ -119,32 +120,36 @@ def generate_batch(batch_size, instances, labels, doc, context):
 
     return batch_labels, batch_word_data, batch_doc_data
 
-num_steps = 1000001
-step_delta = int(num_steps/20)
-
+SAVE_PATH = './save'
+MODEL_NAME = 'test'
+VERSION = 1
+SERVE_PATH = './serve/{}/{}'.format(MODEL_NAME, VERSION)
+checkpoint = tf.train.latest_checkpoint(SAVE_PATH)
 sess = tf.Session()
 sess.run(tf.global_variables_initializer())
-print('Initialized')
-average_loss = 0
-for step in range(num_steps):
-    batch_labels, batch_word_data, batch_doc_data\
-    = generate_batch(batch_size, instances, labels, doc, context)
-    feed_dict = {train_word_dataset : np.squeeze(batch_word_data),
-                    train_doc_dataset : np.squeeze(batch_doc_data),
-                    train_labels : batch_labels}
-    _, l = sess.run([optimizer, loss], feed_dict=feed_dict)
-    average_loss += l
+saver = tf.train.Saver()
+saver.restore(sess, checkpoint)
 
-    if step % step_delta == 0:
-        if step > 0:
-            average_loss = average_loss / step_delta
-        # The average loss is an estimate of the loss over the last 2000 batches.
-        print('Average loss at step %d: %f' % (step, average_loss))
-        average_loss = 0
-    
+print('Initialized')
 
 # Get the weights to save for later
 #     final_doc_embeddings = normalized_doc_embeddings.eval()
-final_word_embeddings = word_embeddings.eval()
-final_word_embeddings_out = softmax_weights.eval()
-final_doc_embeddings = normalized_doc_embeddings.eval()
+final_word_embeddings = word_embeddings.eval(session=sess)
+final_word_embeddings_out = softmax_weights.eval(session=sess)
+final_doc_embeddings = normalized_doc_embeddings.eval(session=sess)
+
+rand_doc = np.random.randint(len_docs)          # document_number
+dist = final_doc_embeddings.dot(final_doc_embeddings[rand_doc][:,None])
+closest_doc = np.argsort(dist,axis=0)[-3:][::-1]
+furthest_doc = np.argsort(dist,axis=0)[0][::-1]
+
+print(dist)
+print(rand_doc)
+
+for idx in closest_doc:
+    print(dist[idx][0][0])
+
+for idx in closest_doc:
+    print(idx)
+
+#print(dist[furthest_doc][0][0])
