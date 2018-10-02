@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
-from utils import build_dataset, generate_batch
+from utils import build_dataset
 
 
 files = glob.glob('./doc2vec/*.txt')
@@ -100,6 +100,24 @@ normalized_doc_embeddings = doc_embeddings / norm
 # Chunk the data to be passed into the tensorflow Model
 ###########################
 
+data_idx = 0
+
+def generate_batch(batch_size, instances, labels, doc, context):
+    global data_idx
+    if data_idx+batch_size<instances:
+        batch_labels = labels[data_idx:data_idx+batch_size]
+        batch_doc_data = doc[data_idx:data_idx+batch_size]
+        batch_word_data = context[data_idx:data_idx+batch_size]
+        data_idx += batch_size
+    else:
+        overlay = batch_size - (instances-data_idx)
+        batch_labels = np.vstack([labels[data_idx:instances],labels[:overlay]])
+        batch_doc_data = np.vstack([doc[data_idx:instances],doc[:overlay]])
+        batch_word_data = np.vstack([context[data_idx:instances],context[:overlay]])
+        data_idx = overlay
+    batch_word_data = np.reshape(batch_word_data,(-1,1))
+
+    return batch_labels, batch_word_data, batch_doc_data
 
 num_steps = 1000001
 step_delta = int(num_steps/20)
@@ -116,7 +134,7 @@ for step in range(num_steps):
                     train_labels : batch_labels}
     _, l = sess.run([optimizer, loss], feed_dict=feed_dict)
     average_loss += l
-    
+
     if step % step_delta == 0:
         if step > 0:
             average_loss = average_loss / step_delta
