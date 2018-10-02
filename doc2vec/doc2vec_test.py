@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from utils import build_dataset, generate_batch
 
 
-files = glob.glob('*.txt')
+files = glob.glob('./doc2vec/*.txt')
 
 words = []
 for f in files:
@@ -65,39 +65,36 @@ sum_ids = np.repeat(np.arange(batch_size),context_window)
 
 len_docs = len(data)
 
-graph = tf.Graph()
+# Input data.
+train_word_dataset = tf.placeholder(tf.int32, shape=[batch_size*context_window])
+train_doc_dataset = tf.placeholder(tf.int32, shape=[batch_size])
+train_labels = tf.placeholder(tf.int32, shape=[batch_size, 1])
 
-with graph.as_default(): # , tf.device('/cpu:0')
-    # Input data.
-    train_word_dataset = tf.placeholder(tf.int32, shape=[batch_size*context_window])
-    train_doc_dataset = tf.placeholder(tf.int32, shape=[batch_size])
-    train_labels = tf.placeholder(tf.int32, shape=[batch_size, 1])
+segment_ids = tf.constant(sum_ids, dtype=tf.int32)
 
-    segment_ids = tf.constant(sum_ids, dtype=tf.int32)
+word_embeddings = tf.Variable(tf.random_uniform([vocabulary_size,embedding_size],-1.0,1.0))
+word_embeddings = tf.concat([word_embeddings,tf.zeros((1,embedding_size))],0)
+doc_embeddings = tf.Variable(tf.random_uniform([len_docs,embedding_size],-1.0,1.0))
 
-    word_embeddings = tf.Variable(tf.random_uniform([vocabulary_size,embedding_size],-1.0,1.0))
-    word_embeddings = tf.concat([word_embeddings,tf.zeros((1,embedding_size))],0)
-    doc_embeddings = tf.Variable(tf.random_uniform([len_docs,embedding_size],-1.0,1.0))
+softmax_weights = tf.Variable(tf.truncated_normal([vocabulary_size, softmax_width],
+                            stddev=1.0 / np.sqrt(embedding_size)))
+softmax_biases = tf.Variable(tf.zeros([vocabulary_size]))
 
-    softmax_weights = tf.Variable(tf.truncated_normal([vocabulary_size, softmax_width],
-                             stddev=1.0 / np.sqrt(embedding_size)))
-    softmax_biases = tf.Variable(tf.zeros([vocabulary_size]))
+# Model.
+# Look up embeddings for inputs.
+embed_words = tf.segment_mean(tf.nn.embedding_lookup(word_embeddings, train_word_dataset),segment_ids)
+embed_docs = tf.nn.embedding_lookup(doc_embeddings, train_doc_dataset)
+embed = (embed_words+embed_docs)/2.0#+embed_hash+embed_users
 
-    # Model.
-    # Look up embeddings for inputs.
-    embed_words = tf.segment_mean(tf.nn.embedding_lookup(word_embeddings, train_word_dataset),segment_ids)
-    embed_docs = tf.nn.embedding_lookup(doc_embeddings, train_doc_dataset)
-    embed = (embed_words+embed_docs)/2.0#+embed_hash+embed_users
+# Compute the softmax loss, using a sample of the negative labels each time.
+loss = tf.reduce_mean(tf.nn.nce_loss(softmax_weights, softmax_biases, train_labels, 
+                                        embed, num_sampled, vocabulary_size))
 
-    # Compute the softmax loss, using a sample of the negative labels each time.
-    loss = tf.reduce_mean(tf.nn.nce_loss(softmax_weights, softmax_biases, train_labels, 
-                                         embed, num_sampled, vocabulary_size))
-
-    # Optimizer.
-    optimizer = tf.train.AdagradOptimizer(0.5).minimize(loss)
-        
-    norm = tf.sqrt(tf.reduce_sum(tf.square(doc_embeddings), 1, keep_dims=True))
-    normalized_doc_embeddings = doc_embeddings / norm
+# Optimizer.
+optimizer = tf.train.AdagradOptimizer(0.5).minimize(loss)
+    
+norm = tf.sqrt(tf.reduce_sum(tf.square(doc_embeddings), 1, keep_dims=True))
+normalized_doc_embeddings = doc_embeddings / norm
 
 ############################
 # Chunk the data to be passed into the tensorflow Model
@@ -107,29 +104,29 @@ with graph.as_default(): # , tf.device('/cpu:0')
 num_steps = 1000001
 step_delta = int(num_steps/20)
 
-with tf.Session(graph=graph) as session:
-    tf.global_variables_initializer().run()
-    print('Initialized')
-    average_loss = 0
-    for step in range(num_steps):
-        batch_labels, batch_word_data, batch_doc_data\
-        = generate_batch(batch_size, instances, labels, doc, context)
-        feed_dict = {train_word_dataset : np.squeeze(batch_word_data),
-                     train_doc_dataset : np.squeeze(batch_doc_data),
-                     train_labels : batch_labels}
-        _, l = session.run([optimizer, loss], feed_dict=feed_dict)
-        average_loss += l
-        
-        if step % step_delta == 0:
-            if step > 0:
-                average_loss = average_loss / step_delta
-            # The average loss is an estimate of the loss over the last 2000 batches.
-            print('Average loss at step %d: %f' % (step, average_loss))
-            average_loss = 0
-        
+sess = tf.Session()
+sess.run(tf.global_variables_initializer())
+print('Initialized')
+average_loss = 0
+for step in range(num_steps):
+    batch_labels, batch_word_data, batch_doc_data\
+    = generate_batch(batch_size, instances, labels, doc, context)
+    feed_dict = {train_word_dataset : np.squeeze(batch_word_data),
+                    train_doc_dataset : np.squeeze(batch_doc_data),
+                    train_labels : batch_labels}
+    _, l = sess.run([optimizer, loss], feed_dict=feed_dict)
+    average_loss += l
+    
+    if step % step_delta == 0:
+        if step > 0:
+            average_loss = average_loss / step_delta
+        # The average loss is an estimate of the loss over the last 2000 batches.
+        print('Average loss at step %d: %f' % (step, average_loss))
+        average_loss = 0
+    
 
-    # Get the weights to save for later
+# Get the weights to save for later
 #     final_doc_embeddings = normalized_doc_embeddings.eval()
-    final_word_embeddings = word_embeddings.eval()
-    final_word_embeddings_out = softmax_weights.eval()
-    final_doc_embeddings = normalized_doc_embeddings.eval()
+final_word_embeddings = word_embeddings.eval()
+final_word_embeddings_out = softmax_weights.eval()
+final_doc_embeddings = normalized_doc_embeddings.eval()
